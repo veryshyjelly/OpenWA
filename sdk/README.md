@@ -20,7 +20,7 @@ resource methods; the PHP SDK has no types layer and returns plain arrays.
 | Python                  | [`rmyndharis-openwa`](python/)               | sync (httpx), PEP 561 typed                                 |
 | PHP                     | [`rmyndharis/openwa`](php/)                  | sync (Guzzle, PHP 8.1+)                                     |
 | Java                    | [`com.rmyndharis:openwa`](java/)             | sync (java.net.http + Gson, Java 17)                        |
-| Go                      | [`github.com/rmyndharis/OpenWA/sdk/go`](go/) | stdlib-only, context-first, injectable transport (Go 1.22+) |
+| Go                      | [`github.com/veryshyjelly/OpenWA/sdk/go`](go/) | stdlib-only, context-first, injectable transport (Go 1.22+) |
 
 ## Coverage
 
@@ -56,7 +56,8 @@ All five SDKs expose the same fluent resource surface:
 > directions, and a list that disagrees with its own design doc reads as an
 > accidental omission rather than a decision.
 >
-> Everything else the gateway publishes is exposed. That sentence used to be an
+> Everything else the gateway publishes is exposed, with the fork-specific language
+> coverage below. That sentence used to be an
 > unqualified "all user-facing resources are", which was false for the session
 > config routes and the two cross-session webhook reads until they were added.
 >
@@ -67,6 +68,16 @@ All five SDKs expose the same fluent resource surface:
 > (`npm run openapi:check` regenerates the file and the diff fails); the route is
 > documented by hand in `docs/06-api-specification.md`, and the docs-contract
 > gate names `POST /mcp` as the one heading allowed outside the contract.
+
+### Fork-specific language coverage
+
+The source-media endpoint is exposed by Go v0.11.1. The other four clients
+remain at upstream v0.11.0 and do not yet expose this fork addition. The
+coverage guard reads this exact-path exception table; Go must still cover it.
+
+| Gateway path | SDKs pending | Reason |
+| --- | --- | --- |
+| `/api/sessions/*/messages/*/*/media/download` | javascript, python, php, java | Fork addition; bounded streaming support currently ships in Go only. |
 
 Every example below addresses a session by its id: the UUID that
 `sessions.create()` returns, not the name passed to it. Create a session once (a
@@ -210,7 +221,7 @@ custom `HttpTransport` that records the request — no network. See
 ## Go
 
 ```bash
-go get github.com/rmyndharis/OpenWA/sdk/go
+go get github.com/veryshyjelly/OpenWA/sdk/go
 ```
 
 ```go
@@ -219,7 +230,7 @@ import (
     "fmt"
     "log"
 
-    openwa "github.com/rmyndharis/OpenWA/sdk/go"
+    openwa "github.com/veryshyjelly/OpenWA/sdk/go"
 )
 
 client, err := openwa.New("http://localhost:2785", "owa_k1_…")
@@ -314,3 +325,5 @@ cd sdk/go && go test -race ./... && go vet ./...
 Each test suite mocks the HTTP layer and asserts on the exact path, so the
 regression that originally shipped a broken `messages/text` path (the real path
 is `messages/send-text`) can never recur silently.
+
+The maintained fork publishes its Go SDK independently as v0.11.1 under github.com/veryshyjelly/OpenWA/sdk/go; the other language SDKs retain the upstream 0.11.0 base. The Go fork adds bounded/cancellable source-media streaming through Messages.DownloadMedia.

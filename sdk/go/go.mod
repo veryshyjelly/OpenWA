@@ -1,3 +1,3 @@
-module github.com/rmyndharis/OpenWA/sdk/go
+module github.com/veryshyjelly/OpenWA/sdk/go
 
 go 1.22

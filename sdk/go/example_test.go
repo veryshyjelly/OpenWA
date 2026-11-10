@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	openwa "github.com/rmyndharis/OpenWA/sdk/go"
+	openwa "github.com/veryshyjelly/OpenWA/sdk/go"
 )
 
 func ExampleNew() {

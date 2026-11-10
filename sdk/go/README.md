@@ -1,6 +1,6 @@
 # OpenWA Go SDK
 
-This document describes SDK 0.11.0. `Messages.Receipts` requires OpenWA 0.28.0 or later. `Contacts.Lid` requires OpenWA 0.27.1 or later. `Groups.SetMemberLabel`, `SearchQuery.Match`, `CustomLinkPreview.ThumbnailURL` and `CustomLinkPreview.ThumbnailBase64` require OpenWA 0.27.0 or later. Send idempotency, webhook failure redrive, message-window filters, poll choices, last-message types, and the `event.response` webhook event name require OpenWA 0.25.0 or later. The `message.receipt` and `poll.vote` webhook event names require OpenWA 0.26.0 or later.
+This document describes SDK 0.11.1. `Messages.Receipts` requires OpenWA 0.28.0 or later. `Contacts.Lid` requires OpenWA 0.27.1 or later. `Groups.SetMemberLabel`, `SearchQuery.Match`, `CustomLinkPreview.ThumbnailURL` and `CustomLinkPreview.ThumbnailBase64` require OpenWA 0.27.0 or later. Send idempotency, webhook failure redrive, message-window filters, poll choices, last-message types, and the `event.response` webhook event name require OpenWA 0.25.0 or later. The `message.receipt` and `poll.vote` webhook event names require OpenWA 0.26.0 or later.
 
 Idiomatic Go client for the [OpenWA](https://github.com/rmyndharis/OpenWA) WhatsApp
 API Gateway. Stdlib-only (no dependencies), context-first, with typed errors and
@@ -10,7 +10,7 @@ OpenWA is an independent project, not affiliated with or endorsed by WhatsApp or
 Meta.
 
 ```bash
-go get github.com/rmyndharis/OpenWA/sdk/go
+go get github.com/veryshyjelly/OpenWA/sdk/go
 ```
 
 Requires Go 1.22+.
@@ -24,7 +24,7 @@ import (
 	"context"
 	"log"
 
-	openwa "github.com/rmyndharis/OpenWA/sdk/go"
+	openwa "github.com/veryshyjelly/OpenWA/sdk/go"
 )
 
 func main() {
@@ -288,11 +288,11 @@ The tag must carry the module's directory prefix, because the module lives in a
 subdirectory rather than at the repository root:
 
 ```bash
-# Correct — `sdk/go/` prefix, matching `module github.com/rmyndharis/OpenWA/sdk/go`
-git tag sdk/go/v0.11.0 && git push origin sdk/go/v0.11.0
+# Correct — `sdk/go/` prefix, matching `module github.com/veryshyjelly/OpenWA/sdk/go`
+git tag sdk/go/v0.11.1 && git push origin sdk/go/v0.11.1
 ```
 
-A bare `v0.11.0` tag is the _app_ version and does nothing for this module.
+A bare repository version tag does not release this nested module.
 Without a prefixed tag, `go get` resolves a pseudo-version
 (`v0.0.0-<date>-<commit>`) — usable, but callers cannot pin a release.
 
@@ -321,3 +321,21 @@ _, err := client.Messages.SendText(ctx, sessionID, openwa.SendTextRequest{ChatID
 ```
 
 The gateway supports text, image, video, audio, document, sticker, location, contact, template, poll, reply and forward sends. Completed calls replay their response; a 409 with the error `code` `IDEMPOTENCY_KEY_IN_PROGRESS` means the first request is still running, so retry with the same key later; a 409 `IDEMPOTENCY_OUTCOME_UNKNOWN` means the message may have been sent, so check the chat and, if it did not arrive, send again with a new key (the `code` tells them apart from the 409 for a session that is not connected). A changed request with the same key returns 422. The gateway retains keys for 24 hours. Bulk, product and button operations have no such guarantee. Omit the key to preserve existing behavior.
+
+## Bounded source-media download (maintained fork)
+
+The fork SDK uses the module path github.com/veryshyjelly/OpenWA/sdk/go and requires the gateway's maintained media-download patch for this operation. The gateway release number and Go SDK version are independent.
+
+```go
+media, err := client.Messages.DownloadMedia(ctx, sessionID, chatID, messageID, 20*1024*1024)
+if err != nil {
+    return err
+}
+defer media.Body.Close()
+_, err = io.Copy(destination, media.Body)
+return err
+```
+
+Call this only after a documented MEDIA_NOT_STORED miss from stored media. It requests one exact source message, never imports history, marks read/views or archives bytes, and currently requires whatsapp-web.js. A positive maxBytes tightens the server limit and also bounds declared/chunked bytes on the client. Body reads retain caller cancellation and the configured request timeout. Close Body even when abandoning a download; discard partial output after any read error, including ErrMediaTooLarge. Filename is untrusted metadata and must not be used as a storage path without sanitizing it. ContentType retains the inert response type; Mimetype preserves X-Media-Mimetype where provided; Size is -1 when unknown.
+
+Gateway refusals remain typed APIError values with StatusCode, Code, RetryAfter and Header. MEDIA_SOURCE_UNAVAILABLE is distinct from a stored-media miss or route/authentication failure. This method uses the same authenticated transport and redirect policy as the rest of the SDK; it does not add retry middleware.

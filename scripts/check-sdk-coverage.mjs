@@ -198,7 +198,17 @@ const covers = (built, path) => built.exact.has(path);
 
 // Read the way the shape gate reads it (entries as written, a parenthetical ignored, `auth/api-keys` a path
 // prefix): cutting every entry to its first segment made all of /api/auth unexposed, key validation included.
-const excluded = unexposedResources(readFileSync(join(root, 'sdk/README.md'), 'utf8'));
+const sdkReadme = readFileSync(join(root, 'sdk/README.md'), 'utf8');
+const excluded = unexposedResources(sdkReadme);
+// Only exact contract paths and named clients may be pending in the fork matrix.
+// Keep all other paths, verbs and SDKs under the existing coverage guarantees.
+const pendingByPath = new Map();
+for (const row of sdkReadme.matchAll(/^\| `(\/api\/[^`]+)` \| ([a-z, ]+) \| ([^|]+) \|$/gm)) {
+  const clients = row[2].split(',').map((name) => name.trim());
+  if (clients.some((name) => !SDKS.some((sdk) => sdk.name === name))) throw new Error(`Unknown SDK in fork coverage: ${row[2]}`);
+  if (pendingByPath.has(row[1])) throw new Error(`Duplicate fork coverage path: ${row[1]}`);
+  pendingByPath.set(row[1], new Set(clients));
+}
 const contract = [...new Set(Object.keys(JSON.parse(readFileSync(join(root, 'openapi.json'), 'utf8')).paths).map(normalize))];
 /** Every shape the contract publishes, including the excluded resources — a wildcard is explained by
  *  a by-id route whether or not the SDKs are asked to expose it. */
@@ -206,6 +216,9 @@ const contractShapes = new Set(contract);
 const inScope = contract.filter((p) => !isUnexposedPath(p, excluded));
 
 const errors = [];
+for (const path of pendingByPath.keys()) {
+  if (!inScope.includes(path)) errors.push(`Fork coverage exception is not an in-scope contract path: ${path}`);
+}
 const built = {};
 
 for (const sdk of SDKS) {
@@ -241,7 +254,7 @@ for (const sdk of SDKS) {
 
 if (!errors.length) {
   for (const path of inScope.sort()) {
-    const missing = SDKS.map((s) => s.name).filter((name) => !covers(built[name], path));
+    const missing = SDKS.map((s) => s.name).filter((name) => !pendingByPath.get(path)?.has(name) && !covers(built[name], path));
     if (missing.length) errors.push(`${path} — published by the gateway, built by no method in: ${missing.join(', ')}`);
   }
   for (const sdk of SDKS) {
@@ -407,5 +420,5 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     console.error('Add the client method, or add the resource to that list with a reason.\n');
     process.exit(1);
   }
-  console.log(`✓ SDK contract coverage OK (${inScope.length} in-scope contract paths reachable from all ${SDKS.length} clients).`);
+  console.log(`✓ SDK contract coverage OK (${inScope.length} in-scope contract paths checked across ${SDKS.length} clients; ${pendingByPath.size} documented fork language exceptions).`);
 }

@@ -134,6 +134,12 @@ func TestRouting(t *testing.T) {
 		{"Messages.VotePoll", func(c *Client) { c.Messages.VotePoll(ctx, "s1", VotePollRequest{}) }, "POST", "/api/sessions/s1/messages/vote-poll"},
 		{"Messages.Star", func(c *Client) { c.Messages.Star(ctx, "s1", StarMessageRequest{}) }, "POST", "/api/sessions/s1/messages/star"},
 		{"Messages.Unpin", func(c *Client) { c.Messages.Unpin(ctx, "s1", UnpinMessageRequest{}) }, "POST", "/api/sessions/s1/messages/unpin"},
+		{"Messages.DownloadMedia", func(c *Client) {
+			media, err := c.Messages.DownloadMedia(ctx, "s1", "c1", "m1", 64)
+			if err == nil {
+				media.Body.Close()
+			}
+		}, "GET", "/api/sessions/s1/messages/c1/m1/media/download"},
 		{"Messages.Media", func(c *Client) { c.Messages.Media(ctx, "s1", "c1", "m1") }, "GET", "/api/sessions/s1/messages/c1/m1/media"},
 		{"Status.Media", func(c *Client) { c.Status.Media(ctx, "s1", "st1") }, "GET", "/api/sessions/s1/status/st1/media"},
 		{"Status.SendText", func(c *Client) { c.Status.SendText(ctx, "s1", SendTextStatusRequest{}) }, "POST", "/api/sessions/s1/status/send-text"},

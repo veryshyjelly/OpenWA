@@ -146,3 +146,14 @@ test('a builder whose last segment is a variable covers only the names its calle
     restore();
   });
 });
+
+test('the documented fork language gap never exempts Go source-media coverage', () => {
+  withCopy(({ edit, run }) => {
+    let result = run();
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    edit('sdk/go/media_download.go', '"/media/download"', '"/media/removed"');
+    result = run();
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /media\/download .*built by no method in: go$/m);
+  });
+});
