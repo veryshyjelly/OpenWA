@@ -6896,6 +6896,7 @@
     },
     "/api/sessions/{sessionId}/messages/{chatId}/{messageId}/media": {
       "get": {
+        "description": "Stored bytes only; never contacts WhatsApp. MEDIA_NOT_STORED means cache miss, not source expiry. Use the explicit /media/download route for an on-demand source read.",
         "operationId": "MessageController_getChatMedia",
         "parameters": [
           {
@@ -6980,6 +6981,145 @@
           }
         },
         "summary": "Download a message’s stored media",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/api/sessions/{sessionId}/messages/{chatId}/{messageId}/media/download": {
+      "get": {
+        "description": "Explicit source read after a stored-media cache miss. Does not mark read/viewed, persist or archive bytes. Uses MEDIA_DOWNLOAD_MAX_BYTES, MEDIA_DOWNLOAD_TIMEOUT_MS and inbound concurrency gates. whatsapp-web.js only.",
+        "operationId": "MessageController_downloadChatMedia",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "description": "Session ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chatId",
+            "required": true,
+            "in": "path",
+            "description": "Chat containing this message",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "required": true,
+            "in": "path",
+            "description": "Full serialized WhatsApp message ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "maxBytes",
+            "required": false,
+            "in": "query",
+            "description": "Positive byte cap; can only tighten the server cap",
+            "schema": {}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Media bytes as an attachment",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid maxBytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, unknown, revoked, or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key's role, session or chat scope, or IP allow-list does not allow this operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEDIA_SOURCE_UNAVAILABLE: source message/media unavailable in this chat; not necessarily expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session not ready or media downloads disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Media exceeds download cap",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Engine does not support on-demand media",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Download interrupted, timed out or temporarily failed; retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Download one message’s media on demand from WhatsApp",
         "tags": [
           "messages"
         ]

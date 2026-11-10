@@ -77,6 +77,12 @@ export interface MethodCapability {
  * silent drop.
  */
 export const CURATED_CAPABILITY_EXCEPTIONS: Record<string, MethodCapability> = {
+  getMessageMedia: {
+    wwjs: { status: 'supported' },
+    baileys: { status: 'not-available', rootCause: 'adapter-gap' },
+    evidence:
+      'wwjs Client.getMessageById and the capped page download resolve one chat-scoped message; Baileys has no single-message on-demand media adapter method',
+  },
   upsertLabel: {
     wwjs: { status: 'not-available', rootCause: 'library-limitation' },
     baileys: { status: 'supported' },

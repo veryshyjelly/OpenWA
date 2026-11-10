@@ -1669,6 +1669,10 @@ Remove a message's pin. Takes no duration.
 
 Download a message's **stored** media bytes.
 
+This endpoint never contacts WhatsApp. A `404` with code `MEDIA_NOT_STORED` is a cache miss,
+not evidence that source media expired. Use the explicit on-demand route below when a client wants
+to try WhatsApp after exhausting its retained copies.
+
 The route serves the chat-media **archive** first, and falls back to the **inline base64 copy** on
 the message row when no archived file is servable. Archiving is **opt-in and off by default**
 (`CHAT_MEDIA_ARCHIVE_ENABLED`); when enabled, each inbound message's media is written to whatever
@@ -1742,6 +1746,37 @@ backfill, which is media-free) · `503` with `Retry-After: 1` on S3, 50 media do
 
 Note: this is a three-path-segment route, so it never collides with the two-segment
 `GET /messages/:chatId/history` regardless of declaration order.
+
+#### GET /api/sessions/:sessionId/messages/:chatId/:messageId/media/download
+
+Download **one message's source media** on demand after a stored-media miss. Currently supported by
+whatsapp-web.js; other engines answer `501`. Uses the usual API-key authorization, session scope,
+chat scope and global rate limits. The full serialized message ID is resolved directly, including
+older messages outside the latest 100; the resolved message must belong to the requested chat.
+Status/broadcast reads and revoked messages are refused. This read does not mark chats read or
+statuses viewed, write message rows, or archive downloaded bytes. Archive enablement, limits and
+retention remain unchanged.
+
+Optional `maxBytes` must be a positive integer and can only tighten `MEDIA_DOWNLOAD_MAX_BYTES`.
+`MEDIA_DOWNLOAD_ENABLED=false` refuses the request. The existing session/process inbound concurrency
+gates bound downloads. `MEDIA_DOWNLOAD_TIMEOUT_MS` bounds lookup, queue wait and download together.
+A disconnect cancels waiting and skips queued work. A whatsapp-web.js page download already running
+cannot be aborted; it retains its concurrency slot until it settles and its late result is discarded.
+No temporary disk file is created by this endpoint.
+
+`200` returns raw bytes, with length, `nosniff`, and attachment disposition. The filename is carried
+in `filename*=UTF-8''...`. `Content-Type` uses the stored route's inert MIME allowlist;
+`X-Media-Mimetype` carries the normalized original MIME essence, including document types.
+Metadata-only history also retains filename/MIME/size markers without downloading attachments.
+Deep history remains metadata-only even when `includeMedia=true` is requested.
+
+Errors: `400` invalid cap; `401`/`403` authorization; `404` code `MEDIA_SOURCE_UNAVAILABLE` for a
+missing/mismatched message, non-media/revoked message, or a source that cannot supply bytes (not
+necessarily expiry); `409` session not ready or code `MEDIA_DOWNLOAD_DISABLED`; `413` declared or
+actual size exceeds the effective cap; `501` unsupported engine; `503` and `Retry-After: 1` on
+timeout, disconnect, incomplete resolution/re-upload, or transient download failure. Rate limits
+remain `429`. Clients should retry transient refusals rather than turn them into an unavailable-media
+caption. A generic route/session `404` is not a `MEDIA_SOURCE_UNAVAILABLE` response.
 
 #### GET /api/sessions/:sessionId/messages/batch/:batchId
 

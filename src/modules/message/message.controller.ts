@@ -782,7 +782,11 @@ export class MessageController {
   // declaration order — Nest/Express match on segment count first.
   @ChatScoped('fenced')
   @Get(':chatId/:messageId/media')
-  @ApiOperation({ summary: 'Download a message’s stored media' })
+  @ApiOperation({
+    summary: 'Download a message’s stored media',
+    description:
+      'Stored bytes only; never contacts WhatsApp. MEDIA_NOT_STORED means cache miss, not source expiry. Use the explicit /media/download route for an on-demand source read.',
+  })
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiParam({ name: 'chatId', description: 'Chat ID containing the message' })
   @ApiParam({ name: 'messageId', description: 'WhatsApp message ID whose media to download' })
@@ -820,6 +824,67 @@ export class MessageController {
     // download means even a mistake there cannot render as active content on the API origin. The
     // dashboard renders chat media from the inline copy, so nothing depends on inline display here.
     return storedFileAttachment(res, source, mimetype);
+  }
+
+  @ChatScoped('fenced')
+  @Get(':chatId/:messageId/media/download')
+  @ApiOperation({
+    summary: 'Download one message’s media on demand from WhatsApp',
+    description:
+      'Explicit source read after a stored-media cache miss. Does not mark read/viewed, persist or archive bytes. Uses MEDIA_DOWNLOAD_MAX_BYTES, MEDIA_DOWNLOAD_TIMEOUT_MS and inbound concurrency gates. whatsapp-web.js only.',
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiParam({ name: 'chatId', description: 'Chat containing this message' })
+  @ApiParam({ name: 'messageId', description: 'Full serialized WhatsApp message ID' })
+  @ApiQuery({ name: 'maxBytes', required: false, description: 'Positive byte cap; can only tighten the server cap' })
+  @ApiResponse({
+    status: 200,
+    description: 'Media bytes as an attachment',
+    content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid maxBytes' })
+  @ApiResponse({
+    status: 404,
+    description: 'MEDIA_SOURCE_UNAVAILABLE: source message/media unavailable in this chat; not necessarily expired',
+  })
+  @ApiResponse({ status: 409, description: 'Session not ready or media downloads disabled' })
+  @ApiResponse({ status: 413, description: 'Media exceeds download cap' })
+  @ApiResponse({ status: 501, description: 'Engine does not support on-demand media' })
+  @ApiResponse({ status: 503, description: 'Download interrupted, timed out or temporarily failed; retry' })
+  async downloadChatMedia(
+    @Param('sessionId') sessionId: string,
+    @Param('chatId') chatId: string,
+    @Param('messageId') messageId: string,
+    @Query('maxBytes') maxBytes: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const abort = new AbortController();
+    const close = () => abort.abort();
+    res.on('close', close);
+    try {
+      const { mimetype, sourceMimetype, filename, ...source } = await this.messageService.downloadChatMedia(
+        sessionId,
+        chatId,
+        messageId,
+        maxBytes === undefined ? undefined : Number(maxBytes),
+        abort.signal,
+      );
+      const file = storedFileAttachment(res, source, mimetype);
+      res.set('X-Media-Mimetype', sourceMimetype);
+      if (filename) {
+        const encoded = encodeURIComponent(filename).replace(
+          /[!'()*]/g,
+          char => '%' + char.charCodeAt(0).toString(16).toUpperCase(),
+        );
+        res.set('Content-Disposition', `attachment; filename*=UTF-8''${encoded}`);
+      }
+      return file;
+    } catch (error) {
+      if ((error as { getStatus?: () => number }).getStatus?.() === 503) res.set('Retry-After', '1');
+      throw error;
+    } finally {
+      res.removeListener('close', close);
+    }
   }
 
   // ========== Delete Message ==========

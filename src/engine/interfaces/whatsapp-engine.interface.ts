@@ -1386,6 +1386,15 @@ export interface MessageOperationsCapability {
  * concern no other member shares.
  */
 export interface ChatHistoryCapability {
+  /** One bounded, explicit source-media read. Unsupported engines answer 501.
+   * Does not mark read/viewed or persist/archive bytes. The caller supplies a deadline signal. */
+  getMessageMedia(
+    chatId: string,
+    messageId: string,
+    maxBytes: number,
+    signal: AbortSignal,
+  ): Promise<{ mimetype: string; filename?: string; data: string }>;
+
   /**
    * Read a chat's most recent `limit` messages, returned oldest first (ascending timestamp). When
    * `includeMedia` downloads blobs, an optional `mediaMaxBytes` tightens the declared-size pre-gate

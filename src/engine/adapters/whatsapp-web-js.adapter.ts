@@ -76,6 +76,12 @@ import {
 } from './inbound-media-cap';
 import { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
 import { readWid } from '../types/whatsapp-web-js.types';
+import {
+  ConflictException,
+  NotFoundException,
+  PayloadTooLargeException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 
 export interface WhatsAppWebJsConfig {
   sessionId: string;
@@ -193,6 +199,7 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
       // public getNumberId reports the neutral phone id.
       getNumberId: number => this.contacts.lookupNumberId(number),
       capInboundMediaFor: (msg, maxBytesOverride, ticket) => this.capInboundMediaFor(msg, maxBytesOverride, ticket),
+      downloadMessageMedia: (msg, maxBytes, signal) => this.downloadMessageMedia(msg, maxBytes, signal),
       config: this.config,
       getCallbacks: () => this.callbacks,
     };
@@ -265,6 +272,42 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
    * With a ticket (PostgreSQL), the download waits for a slot of the session's room first, and that
    * slot is held until the page download settles, since it cannot be aborted.
    */
+  private async downloadMessageMedia(msg: Message, maxBytes: number, signal: AbortSignal) {
+    if (!isMediaDownloadEnabled())
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'MEDIA_DOWNLOAD_DISABLED',
+        message: 'Media downloads are disabled',
+      });
+    const cap = Math.min(maxBytes, inboundMediaMaxBytes());
+    if (declaredMediaSize(msg) > cap) throw new PayloadTooLargeException('Media exceeds the download cap');
+    // Use the same session and process gates as live/history media. On timeout/disconnect the
+    // service stops waiting; an already-started page download retains its slot until it settles.
+    return this.inboundLimiter.run(() =>
+      runUnderGlobalMediaGate(async () => {
+        signal.throwIfAborted();
+        this.ensureReady();
+        let media: PageMediaDownload | null | undefined;
+        try {
+          media = await downloadCappedMedia(msg, cap, true);
+        } catch {
+          throw new ServiceUnavailableException('WhatsApp media download failed; retry shortly');
+        }
+        signal.throwIfAborted();
+        this.ensureReady();
+        if (!media)
+          throw new NotFoundException({
+            statusCode: 404,
+            code: 'MEDIA_SOURCE_UNAVAILABLE',
+            message: 'WhatsApp cannot supply this message media',
+          });
+        if (media.sizeBytes > cap) throw new PayloadTooLargeException('Media exceeds the download cap');
+        if (!media.data) throw new ServiceUnavailableException('WhatsApp returned incomplete media; retry shortly');
+        return media;
+      }),
+    );
+  }
+
   private async capInboundMediaFor(
     msg: Message,
     maxBytesOverride?: number,
@@ -717,6 +760,10 @@ export class WhatsAppWebJsAdapter implements IWhatsAppEngine {
   }
 
   // ========== Gap Quick Wins Implementation ==========
+
+  getMessageMedia(chatId: string, messageId: string, maxBytes: number, signal: AbortSignal) {
+    return this.messaging.getMessageMedia(chatId, messageId, maxBytes, signal);
+  }
 
   getChatHistory(
     chatId: string,

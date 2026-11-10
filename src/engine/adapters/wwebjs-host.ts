@@ -37,6 +37,11 @@ export interface WwebjsEngineHost {
     maxBytesOverride?: number,
     ticket?: InboundTicket,
   ): Promise<IncomingMessage['media'] | undefined>;
+  downloadMessageMedia?(
+    msg: Message,
+    maxBytes: number,
+    signal: AbortSignal,
+  ): Promise<{ mimetype: string; filename?: string; data: string }>;
   readonly config: WhatsAppWebJsConfig;
   /** Live callbacks bag — read per event, since initialize() installs it after delegates are built. */
   getCallbacks(): EngineEventCallbacks;

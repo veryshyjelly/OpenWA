@@ -1,4 +1,11 @@
-import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  NotImplementedException,
+  PayloadTooLargeException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, ObjectLiteral, Repository } from 'typeorm';
 import { Readable } from 'stream';
@@ -22,6 +29,8 @@ import { SessionWriteScope } from '../../common/utils/session-write-scope';
 // TypeScript does not check, so `implements` is what keeps the two in step.
 import type { PluginMessagePort } from '../../core/plugins/plugin-host-ports';
 import { MessageWindow, messageTimeBoundarySeconds, validateMessageWindow } from './message-window';
+import { inboundMediaMaxBytes } from '../../engine/adapters/inbound-media-cap';
+import { onDemandMediaRead } from '../../common/utils/on-demand-media';
 
 // Re-exported for existing importers (bulk send shares the rendered-template cap with the send path).
 export { DEFAULT_TEMPLATE_RENDER_MAX_CHARS } from './message-send.service';
@@ -659,10 +668,48 @@ export class MessageService implements PluginMessagePort {
       // base64 would serve garbage, so report it as absent. Same discriminator as the send path.
       /^https?:\/\//i.test(inline.data)
     ) {
-      throw new NotFoundException('No media stored for this message');
+      throw new NotFoundException({
+        statusCode: 404,
+        code: 'MEDIA_NOT_STORED',
+        message: 'No media stored for this message',
+      });
     }
     const bytes = Buffer.from(inline.data, 'base64');
     return { stream: Readable.from([bytes]), size: bytes.length, mimetype: inertMimetype(inline.mimetype) };
+  }
+
+  /** Explicit source read; never writes message rows or archives, regardless of archive settings. */
+  async downloadChatMedia(
+    sessionId: string,
+    chatId: string,
+    messageId: string,
+    maxBytes?: number,
+    signal?: AbortSignal,
+  ) {
+    if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) {
+      throw new BadRequestException('maxBytes must be a positive integer');
+    }
+    const engine = this.getEngine(sessionId);
+    if (!engine.getMessageMedia) throw new NotImplementedException('On-demand media is unsupported by this engine');
+    const cap = Math.min(maxBytes ?? inboundMediaMaxBytes(), inboundMediaMaxBytes());
+    return onDemandMediaRead(async deadline => {
+      const media = await engine.getMessageMedia(chatId, messageId, cap, deadline);
+      deadline.throwIfAborted();
+      // Defensive engine boundary: also enforce the cap before decoding base64 into Node bytes.
+      if (media.data.length > Math.ceil(cap / 3) * 4)
+        throw new PayloadTooLargeException('Media exceeds the download cap');
+      const bytes = Buffer.from(media.data, 'base64');
+      if (bytes.length > cap) throw new PayloadTooLargeException('Media exceeds the download cap');
+      const essence = media.mimetype.split(';')[0].trim().toLowerCase();
+      const sourceMimetype = /^[\w!#$&^.+-]+\/[\w!#$&^.+-]+$/.test(essence) ? essence : 'application/octet-stream';
+      return {
+        stream: Readable.from([bytes]),
+        size: bytes.length,
+        mimetype: inertMimetype(media.mimetype),
+        sourceMimetype,
+        filename: media.filename,
+      };
+    }, signal);
   }
 
   /** Maximum messages a single getChatHistory call may request from the engine. */

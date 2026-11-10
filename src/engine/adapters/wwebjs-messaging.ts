@@ -15,7 +15,7 @@ import {
   Quotable,
 } from '../interfaces/whatsapp-engine.interface';
 import { MessageWithReactions, SerializedWid, readWid } from '../types/whatsapp-web-js.types';
-import { BadRequestException, NotImplementedException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, NotImplementedException } from '@nestjs/common';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
 import { EngineRefusedError } from '../../common/errors/engine-refused.error';
 import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
@@ -114,6 +114,7 @@ export interface PageMediaDownload {
 export async function downloadMediaInPage(args: {
   msgId: string;
   maxBytes: number;
+  strict?: boolean;
 }): Promise<PageMediaDownload | null | undefined> {
   type PageMsg = Record<string, unknown> & {
     mimetype: string;
@@ -136,11 +137,18 @@ export async function downloadMediaInPage(args: {
   const collection = w.require('WAWebCollections').Msg;
   const msg = collection.get(args.msgId) || (await collection.getMessagesById([args.msgId]))?.messages?.[0];
   // REUPLOADING: the media expired and the phone is re-uploading it; it cannot be downloaded now.
-  if (!msg || !msg.mediaData || msg.mediaData.mediaStage === 'REUPLOADING') return null;
+  if (!msg || !msg.mediaData) return null;
+  if (msg.mediaData.mediaStage === 'REUPLOADING') {
+    if (args.strict) throw new Error('Media is being re-uploaded; retry shortly');
+    return null;
+  }
   if (msg.mediaData.mediaStage !== 'RESOLVED') {
     await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
   }
-  if (msg.mediaData.mediaStage.includes('ERROR') || msg.mediaData.mediaStage === 'FETCHING') return undefined;
+  if (msg.mediaData.mediaStage.includes('ERROR') || msg.mediaData.mediaStage === 'FETCHING') {
+    if (args.strict) throw new Error('Media resolution is incomplete; retry shortly');
+    return undefined;
+  }
   try {
     const noopQpl = {
       addAnnotations() {
@@ -192,13 +200,18 @@ export async function downloadMediaInPage(args: {
 export async function downloadCappedMedia(
   msg: Message,
   maxBytes: number,
+  strict?: boolean,
 ): Promise<PageMediaDownload | null | undefined> {
   const { pupPage } = (
     msg as unknown as {
       client: { pupPage: { evaluate: <T, A>(fn: (arg: A) => Promise<T>, arg: A) => Promise<T> } };
     }
   ).client;
-  return pupPage.evaluate(downloadMediaInPage, { msgId: readWid(msg.id) ?? '', maxBytes });
+  return pupPage.evaluate(downloadMediaInPage, {
+    msgId: readWid(msg.id) ?? '',
+    maxBytes,
+    ...(strict ? { strict: true } : {}),
+  });
 }
 
 /**
@@ -1127,6 +1140,28 @@ export class WwebjsMessaging {
     return chat?.id._serialized === own;
   }
 
+  async getMessageMedia(chatId: string, messageId: string, maxBytes: number, signal: AbortSignal) {
+    this.host.ensureReady();
+    const unavailable = () =>
+      new NotFoundException({
+        statusCode: 404,
+        code: 'MEDIA_SOURCE_UNAVAILABLE',
+        message: 'WhatsApp cannot supply this message media',
+      });
+    // Status reads have their own retention/view rules. Never cross that boundary from chat history.
+    if (chatId.endsWith('@broadcast') || !SERIALIZED_MESSAGE_ID.test(messageId)) throw unavailable();
+    return this.withPage('getMessageMedia', async () => {
+      signal.throwIfAborted();
+      const message = await this.client().getMessageById(messageId);
+      if (!message || !(await this.isInChat(message, chatId))) throw unavailable();
+      signal.throwIfAborted();
+      if (!message.hasMedia || message.type === MessageTypes.REVOKED) throw unavailable();
+      this.host.ensureReady();
+      if (!this.host.downloadMessageMedia) throw new NotImplementedException('On-demand media is unsupported');
+      return this.host.downloadMessageMedia(message, maxBytes, signal);
+    });
+  }
+
   async getChatHistory(
     chatId: string,
     limit: number = 50,
@@ -1229,6 +1264,7 @@ export class WwebjsMessaging {
           this.host.logger.warn(`Failed to resolve quoted message for ${msg.id._serialized}: ${String(error)}`);
         }
       }
+      if (!includeMedia && msg.hasMedia) out.media = declaredOnlyMedia(msg);
       if (includeMedia && msg.hasMedia) {
         if (mediaBudget <= 0) {
           out.media = declaredOnlyMedia(msg);

@@ -6457,6 +6457,7 @@ describe('WhatsAppWebJsAdapter inbound media measured in the page', () => {
         ...members(upstream).filter(m => m !== 'size'),
         'byteLength',
         'maxBytes',
+        'strict',
         'msgId',
         'sizeBytes',
         'name',
