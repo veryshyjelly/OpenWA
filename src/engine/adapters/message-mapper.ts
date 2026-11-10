@@ -92,7 +92,7 @@ export interface RawMessageFields {
   /** Set on group messages: the participant WID that actually sent the message. */
   author?: string;
   /** WIDs @mentioned in the message; whatsapp-web.js attaches this to every Message. */
-  mentionedIds?: string[];
+  mentionedIds?: Array<string | SerializedWid>;
   /** Whether the message was forwarded, and how many times; whatsapp-web.js sets both on every Message. */
   isForwarded?: boolean;
   forwardingScore?: number;
@@ -150,7 +150,8 @@ export function buildIncomingMessageBase(msg: RawMessageFields): IncomingMessage
 
   // @mentioned WIDs, when present — used for command targeting (e.g. `/tr grant @user`).
   if (msg.mentionedIds && msg.mentionedIds.length > 0) {
-    incoming.mentionedIds = msg.mentionedIds;
+    const mentionedIds = msg.mentionedIds.map(readWid).filter((id): id is string => !!id);
+    if (mentionedIds.length) incoming.mentionedIds = mentionedIds;
   }
 
   // Forwarded content is not the sender's own words; surface that so consumers do not attribute it to them.

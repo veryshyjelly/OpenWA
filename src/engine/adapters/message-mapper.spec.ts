@@ -124,6 +124,14 @@ describe('buildIncomingMessageBase', () => {
     expect(r.mentionedIds).toEqual(['222@lid', '333@lid']);
   });
 
+  it('normalizes serialized and renamed mention WIDs for history and live API consumers', () => {
+    const r = buildIncomingMessageBase({
+      ...base,
+      mentionedIds: [{ _serialized: '222@lid' }, { $1: '333@lid' }, '444@c.us', {}, { _serialized: '' }],
+    });
+    expect(r.mentionedIds).toEqual(['222@lid', '333@lid', '444@c.us']);
+  });
+
   it('maps isForwarded and forwardingScore for a forwarded message', () => {
     const r = buildIncomingMessageBase({ ...base, isForwarded: true, forwardingScore: 1 });
     expect(r.isForwarded).toBe(true);
