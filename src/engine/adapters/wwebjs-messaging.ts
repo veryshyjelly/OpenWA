@@ -142,14 +142,18 @@ export async function downloadMediaInPage(args: {
     if (args.strict) throw new Error('Media is being re-uploaded; retry shortly');
     return null;
   }
-  if (msg.mediaData.mediaStage !== 'RESOLVED') {
+  // Historical models already carrying the source path and keys can go straight to the bounded
+  // downloader. The UI resolver returns while still FETCHING and restarting it on every API read
+  // can keep a missing attachment in that preliminary state forever, masking the source's 404.
+  const directSourceRead = args.strict && Boolean(msg.directPath && msg.mediaKey);
+  if (msg.mediaData.mediaStage !== 'RESOLVED' && !directSourceRead) {
     await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
   }
   // An ERROR stage alone does not distinguish a missing source from a transient failure.
   // Explicit reads still try the capped source download below: its 404 is authoritative, and
   // bytes may be retrievable even when WhatsApp's preliminary resolver left an ERROR marker.
   if (msg.mediaData.mediaStage.includes('ERROR') && !args.strict) return undefined;
-  if (msg.mediaData.mediaStage === 'FETCHING') {
+  if (msg.mediaData.mediaStage === 'FETCHING' && !directSourceRead) {
     if (args.strict) throw new Error('Media resolution is incomplete; retry shortly');
     return undefined;
   }

@@ -1773,6 +1773,9 @@ Deep history remains metadata-only even when `includeMedia=true` is requested.
 On explicit source reads, WhatsApp's preliminary `ERROR_*` media stage is not itself a final
 availability result. The capped source download is still attempted: a source `404` becomes
 `MEDIA_SOURCE_UNAVAILABLE`, available bytes are returned, and temporary source failures remain retryable.
+When the model already has its source path and media key, explicit reads bypass the UI resolver:
+that resolver can return before `FETCHING` finishes and restarting it can mask the source result.
+Messages missing those fields retain the resolution path; re-uploading remains retryable.
 
 Errors: `400` invalid cap; `401`/`403` authorization; `404` code `MEDIA_SOURCE_UNAVAILABLE` for a
 missing/mismatched message, non-media/revoked message, or a source that cannot supply bytes (not

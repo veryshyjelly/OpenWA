@@ -176,31 +176,46 @@ describe('single-message source media', () => {
     }
   });
 
-  it.each(['ERROR_MISSING', 'ERROR_UNKNOWN'])('checks the source after %s and can recover bytes', async stage => {
-    const download = jest.fn().mockResolvedValue(new ArrayBuffer(3));
-    const message = { mediaData: { mediaStage: stage }, downloadMedia: jest.fn(), mimetype: 'image/webp' };
-    const target = globalThis as unknown as { window?: unknown };
-    target.window = {
-      require: (module: string) =>
-        module === 'WAWebCollections'
-          ? { Msg: { get: () => message } }
-          : { downloadManager: { downloadAndMaybeDecrypt: download } },
-      WWebJS: { arrayBufferToBase64Async: jest.fn().mockResolvedValue('YWJj') },
-    };
-    try {
-      await expect(downloadMediaInPage({ msgId: ID, maxBytes: 100, strict: true })).resolves.toMatchObject({
-        data: 'YWJj',
-        sizeBytes: 3,
-      });
-      expect(download).toHaveBeenCalledTimes(1);
-    } finally {
-      delete target.window;
-    }
-  });
+  it.each(['NEED_POKE', 'FETCHING', 'ERROR_MISSING', 'ERROR_UNKNOWN'])(
+    'checks the source after %s and can recover bytes',
+    async stage => {
+      const download = jest.fn().mockResolvedValue(new ArrayBuffer(3));
+      const message = {
+        mediaData: { mediaStage: stage },
+        downloadMedia: jest.fn(),
+        mimetype: 'image/webp',
+        directPath: '/source',
+        mediaKey: 'key',
+      };
+      const target = globalThis as unknown as { window?: unknown };
+      target.window = {
+        require: (module: string) =>
+          module === 'WAWebCollections'
+            ? { Msg: { get: () => message } }
+            : { downloadManager: { downloadAndMaybeDecrypt: download } },
+        WWebJS: { arrayBufferToBase64Async: jest.fn().mockResolvedValue('YWJj') },
+      };
+      try {
+        await expect(downloadMediaInPage({ msgId: ID, maxBytes: 100, strict: true })).resolves.toMatchObject({
+          data: 'YWJj',
+          sizeBytes: 3,
+        });
+        expect(download).toHaveBeenCalledTimes(1);
+        expect(message.downloadMedia).not.toHaveBeenCalled();
+      } finally {
+        delete target.window;
+      }
+    },
+  );
 
   it.each([404, 503, 429])('uses the source response after ERROR_MISSING (HTTP %s)', async status => {
     const download = jest.fn().mockRejectedValue({ status, name: 'MediaDownloadError' });
-    const message = { mediaData: { mediaStage: 'ERROR_MISSING' }, downloadMedia: jest.fn() };
+    const message = {
+      mediaData: { mediaStage: 'FETCHING' },
+      downloadMedia: jest.fn(),
+      directPath: '/source',
+      mediaKey: 'key',
+    };
     const target = globalThis as unknown as { window?: unknown };
     target.window = {
       require: (module: string) =>
@@ -213,6 +228,7 @@ describe('single-message source media', () => {
       if (status === 404) await expect(read).resolves.toBeUndefined();
       else await expect(read).rejects.toThrow(`status ${status}`);
       expect(download).toHaveBeenCalledTimes(1);
+      expect(message.downloadMedia).not.toHaveBeenCalled();
     } finally {
       delete target.window;
     }
