@@ -145,7 +145,11 @@ export async function downloadMediaInPage(args: {
   if (msg.mediaData.mediaStage !== 'RESOLVED') {
     await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1 });
   }
-  if (msg.mediaData.mediaStage.includes('ERROR') || msg.mediaData.mediaStage === 'FETCHING') {
+  // An ERROR stage alone does not distinguish a missing source from a transient failure.
+  // Explicit reads still try the capped source download below: its 404 is authoritative, and
+  // bytes may be retrievable even when WhatsApp's preliminary resolver left an ERROR marker.
+  if (msg.mediaData.mediaStage.includes('ERROR') && !args.strict) return undefined;
+  if (msg.mediaData.mediaStage === 'FETCHING') {
     if (args.strict) throw new Error('Media resolution is incomplete; retry shortly');
     return undefined;
   }

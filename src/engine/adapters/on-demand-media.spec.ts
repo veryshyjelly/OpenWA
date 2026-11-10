@@ -165,7 +165,7 @@ describe('single-message source media', () => {
     expect(read).not.toHaveBeenCalled();
   });
 
-  it.each(['REUPLOADING', 'FETCHING', 'ERROR'])('keeps %s page state retryable on strict reads', async stage => {
+  it.each(['REUPLOADING', 'FETCHING'])('keeps %s page state retryable on strict reads', async stage => {
     const message = { mediaData: { mediaStage: stage }, downloadMedia: jest.fn() };
     const target = globalThis as unknown as { window: unknown };
     target.window = { require: () => ({ Msg: { get: () => message } }) };
@@ -173,6 +173,48 @@ describe('single-message source media', () => {
       await expect(downloadMediaInPage({ msgId: ID, maxBytes: 100, strict: true })).rejects.toThrow(/retry/);
     } finally {
       delete (target as { window?: unknown }).window;
+    }
+  });
+
+  it.each(['ERROR_MISSING', 'ERROR_UNKNOWN'])('checks the source after %s and can recover bytes', async stage => {
+    const download = jest.fn().mockResolvedValue(new ArrayBuffer(3));
+    const message = { mediaData: { mediaStage: stage }, downloadMedia: jest.fn(), mimetype: 'image/webp' };
+    const target = globalThis as unknown as { window?: unknown };
+    target.window = {
+      require: (module: string) =>
+        module === 'WAWebCollections'
+          ? { Msg: { get: () => message } }
+          : { downloadManager: { downloadAndMaybeDecrypt: download } },
+      WWebJS: { arrayBufferToBase64Async: jest.fn().mockResolvedValue('YWJj') },
+    };
+    try {
+      await expect(downloadMediaInPage({ msgId: ID, maxBytes: 100, strict: true })).resolves.toMatchObject({
+        data: 'YWJj',
+        sizeBytes: 3,
+      });
+      expect(download).toHaveBeenCalledTimes(1);
+    } finally {
+      delete target.window;
+    }
+  });
+
+  it.each([404, 503, 429])('uses the source response after ERROR_MISSING (HTTP %s)', async status => {
+    const download = jest.fn().mockRejectedValue({ status, name: 'MediaDownloadError' });
+    const message = { mediaData: { mediaStage: 'ERROR_MISSING' }, downloadMedia: jest.fn() };
+    const target = globalThis as unknown as { window?: unknown };
+    target.window = {
+      require: (module: string) =>
+        module === 'WAWebCollections'
+          ? { Msg: { get: () => message } }
+          : { downloadManager: { downloadAndMaybeDecrypt: download } },
+    };
+    try {
+      const read = downloadMediaInPage({ msgId: ID, maxBytes: 100, strict: true });
+      if (status === 404) await expect(read).resolves.toBeUndefined();
+      else await expect(read).rejects.toThrow(`status ${status}`);
+      expect(download).toHaveBeenCalledTimes(1);
+    } finally {
+      delete target.window;
     }
   });
 });

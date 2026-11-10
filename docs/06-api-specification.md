@@ -1770,6 +1770,10 @@ in `filename*=UTF-8''...`. `Content-Type` uses the stored route's inert MIME all
 Metadata-only history also retains filename/MIME/size markers without downloading attachments.
 Deep history remains metadata-only even when `includeMedia=true` is requested.
 
+On explicit source reads, WhatsApp's preliminary `ERROR_*` media stage is not itself a final
+availability result. The capped source download is still attempted: a source `404` becomes
+`MEDIA_SOURCE_UNAVAILABLE`, available bytes are returned, and temporary source failures remain retryable.
+
 Errors: `400` invalid cap; `401`/`403` authorization; `404` code `MEDIA_SOURCE_UNAVAILABLE` for a
 missing/mismatched message, non-media/revoked message, or a source that cannot supply bytes (not
 necessarily expiry); `409` session not ready or code `MEDIA_DOWNLOAD_DISABLED`; `413` declared or
