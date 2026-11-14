@@ -571,7 +571,7 @@ custom container that drops the `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` setup or th
 
 **Cause D — Debian 12 OS Chromium SIGTRAP in non-root Pods.**
 If `Code: null` happens on Kubernetes, and the host kernel logs or `dmesg` shows `Trace/breakpoint trap (core dumped)` with exit code 133, the underlying Debian 12 OS `chromium` package has crashed due to strict non-root or seccomp constraints (even with `--no-zygote` or `Unconfined` seccomp).
-_Fix:_ On amd64, do not use the `chromium` package from Debian's `apt` — it SIGTRAPs under strict non-root/seccomp. Instead, download Chrome for Testing via Puppeteer during the Docker build (`./node_modules/.bin/puppeteer browsers install 'chrome@157.0.8103.50'`) and point `PUPPETEER_EXECUTABLE_PATH` to it. (arm64 keeps Debian's `chromium`, which ships a native arm64 binary, by choice: Chrome for Testing publishes linux-arm64 builds only from 153, and the image has not moved arm64 to one.) The official `Dockerfile` implements this mixed approach.
+_Fix:_ On amd64, do not use the `chromium` package from Debian's `apt` — it SIGTRAPs under strict non-root/seccomp. Instead, download Chrome for Testing via Puppeteer during the Docker build (`./node_modules/.bin/puppeteer browsers install 'chrome@157.0.8103.78'`) and point `PUPPETEER_EXECUTABLE_PATH` to it. (arm64 keeps Debian's `chromium`, which ships a native arm64 binary, by choice: Chrome for Testing publishes linux-arm64 builds only from 153, and the image has not moved arm64 to one.) The official `Dockerfile` implements this mixed approach.
 
 **Quick triage:** run `docker stats openwa-api`, click **Start**, and watch which resource spikes toward its
 limit the instant before the failure — that tells you A vs B. If neither moves and you see the crashpad
@@ -865,8 +865,14 @@ rm -rf node_modules/whatsapp-web.js && npm ci
   cannot be set, an app-state resync that never settles
 - On Baileys, the process exits with `TypeError: terminated` some seconds after an
   `Inbound media download passed MEDIA_DOWNLOAD_TIMEOUT_MS` warning (the media-stream patch is missing)
+- On Baileys, the log repeats `Baileys connection dropped; reconnecting` with `statusCode=500` and
+  `reason=Stream Errored (ack)` about every 50 minutes, and the account may stop receiving until the
+  session is restarted (the status-ack patch is missing)
+- On Baileys, contact statuses never reach the status list of an account that receives them as
+  `<status>` stanzas (the status-ack patch is missing, or is the 0.30.1 revision, which only
+  acknowledged them)
 
-**Cause:** OpenWA applies fourteen exact source transforms to its engine libraries at install time
+**Cause:** OpenWA applies fifteen exact source transforms to its engine libraries at install time
 (docs/29 §29.3). The Docker image runs them without `--best-effort`, so a source shape a patcher
 cannot recognise fails the image build. Source installs run the Puppeteer compatibility transform
 without best-effort too, because browser teardown depends on it. The other transforms use
@@ -894,11 +900,13 @@ was cut short: an interrupted install left it half applied, and reinstalling `@w
 > `patch-wwebjs-201832.js` is not in that list. It carries its own startup check and its own entry
 > above, because a partially applied backport needs different advice than one that never ran.
 
-> A patch that never applied is not fatal on its own, with one exception: without
+> A patch that never applied is not fatal on its own, with two exceptions: without
 > `patch-baileys-media-stream.js`, a Baileys media download abandoned at `MEDIA_DOWNLOAD_TIMEOUT_MS` or
-> the byte cap can end the process with `TypeError: terminated`. Every other patch affects only the
-> capability it repairs and the rest of the gateway runs normally, which is why this is easy to misread
-> as a bug in one route.
+> the byte cap can end the process with `TypeError: terminated`, and without
+> `patch-baileys-status-ack.js`, an account that WhatsApp sends contact statuses to as `<status>`
+> stanzas drops its connection about every 50 minutes and stores none of them. Every other patch
+> affects only the capability it repairs and the rest of the gateway runs normally, which is why this
+> is easy to misread as a bug in one route.
 
 ### Issue: Reads on a large account fail with `did not answer ... in time` or `Runtime.callFunctionOn timed out`
 
